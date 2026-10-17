@@ -46,13 +46,22 @@ jobs:
         run: |
           M=android/app/src/main/AndroidManifest.xml
           sed -i 's#</application>#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n</application>#' "$M"
-      - name: Enable Desugaring (Final Fix)
+      - name: Fix Desugaring (Python)
         run: |
-          G=android/app/build.gradle.kts
-          # 1. Insert isCoreLibraryDesugaringEnabled inside compileOptions
-          sed -i '/compileOptions {/a \        isCoreLibraryDesugaringEnabled = true' "$G"
-          # 2. Insert the library inside the existing dependencies block
-          sed -i '/dependencies {/a \    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' "$G"
+          python3 -c "
+          import re
+          with open('android/app/build.gradle.kts', 'r') as f:
+              content = f.read()
+          
+          # 1. Enable desugaring in compileOptions
+          content = content.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true')
+          
+          # 2. Add the library to dependencies
+          content = content.replace('dependencies {', 'dependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")')
+          
+          with open('android/app/build.gradle.kts', 'w') as f:
+              f.write(content)
+          "
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
