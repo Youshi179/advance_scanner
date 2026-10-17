@@ -38,7 +38,7 @@ jobs:
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
 
-      - name: Set minSdk 23 (flutter_secure_storage)
+      - name: Set minSdk 23
         run: |
           G=android/app/build.gradle.kts
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' "$G" || true
@@ -58,20 +58,20 @@ jobs:
             sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application#' "$M"
           fi
 
-      - name: Enable Core Library Desugaring
+      - name: Enable Core Library Desugaring (The Right Way)
         run: |
           G=android/app/build.gradle.kts
-          if ! grep -q "isCoreLibraryDesugaringEnabled" "$G"; then
-            sed -i '/compileOptions {/a \        isCoreLibraryDesugaringEnabled = true' "$G"
-          fi
-          if ! grep -q "coreLibraryDesugaring(" "$G"; then
-            cat >> "$G" <<'EOF'
-
-          dependencies {
-              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-          }
-          EOF
-          fi
+          
+          # Remove old attempts to avoid duplicates
+          sed -i '/coreLibraryDesugaring/d' "$G"
+          sed -i '/isCoreLibraryDesugaringEnabled/d' "$G"
+          
+          # Use awk to insert the dependency exactly inside the existing dependencies block
+          awk '/^dependencies \{/ { print; print "    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")"; next }1' "$G" > tmp.gradle && mv tmp.gradle "$G"
+          
+          # Use awk to insert the enabled flag inside the existing compileOptions block
+          awk '/compileOptions \{/ { print; print "        isCoreLibraryDesugaringEnabled = true"; next }1' "$G" > tmp.gradle && mv tmp.gradle "$G"
+          
           echo "=========== build.gradle.kts ==========="
           cat "$G"
 
