@@ -32,6 +32,18 @@ jobs:
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
+      - name: Remove stale plugin registrant
+        run: |
+          echo "=== WorkmanagerPlugin found in: ==="
+          grep -rn "WorkmanagerPlugin" android/app/src || true
+          echo "=== java files before cleanup ==="
+          find android/app/src/main/java -type f 2>/dev/null || true
+          rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+          if [ -d android/app/src/main/java ]; then
+            find android/app/src/main/java -name "*.java" -exec sed -i '/dev\.fluttercommunity\.workmanager\.WorkmanagerPlugin/d' {} +
+          fi
+          echo "=== after cleanup ==="
+          grep -rn "WorkmanagerPlugin" android/app/src || echo "clean: no WorkmanagerPlugin left"
       - name: flutter_secure_storage needs minSdk 23
         run: |
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts || true
