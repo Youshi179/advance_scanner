@@ -1,321 +1,254 @@
 import 'dart:convert';
-import 'dart:math';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:http/http.dart' as http;
 import 'models.dart';
 
-const timeout = Duration(seconds: 20);
-const okxHost = 'www.okx.cab'; // .cab avoids regional blocks of .com
+const exchanges = ['Binance', 'OKX', 'Bybit', 'Bitget', 'KuCoin', 'MEXC', 'Gate.io', 'BingX'];
 
-const exchanges = [
-  'Binance', 'OKX', 'Bybit', 'Bitget', 'KuCoin', 'MEXC', 'Gate.io', 'BingX'
-];
+/// CRITICAL: OKX must use okx.cab (okx.com is blocked in Pakistan).
+const okxHost = 'www.okx.cab';
 
-Future<dynamic> getJson(String url, {Map<String, String>? headers}) async {
-  final r = await http.get(Uri.parse(url), headers: headers).timeout(timeout);
-  if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-  return jsonDecode(r.body);
-}
+const stables = {
+  'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD', 'USDD', 'USDP', 'PYUSD',
+  'USDE', 'USD1', 'USDJ', 'GUSD', 'LUSD', 'FRAX', 'USDX'
+};
 
-double dbl(dynamic v) {
-  if (v == null) return 0;
-  if (v is num) return v.toDouble();
-  return double.tryParse(v.toString()) ?? 0;
-}
+final _quotes = <String>[
+  'USDT', 'USDC', 'FDUSD', 'BUSD', 'TUSD', 'DAI', 'USDD', 'USDE', 'USD1', 'PYUSD',
+  'EUR', 'GBP', 'TRY', 'BRL', 'AUD', 'ARS', 'RUB', 'UAH', 'PLN', 'CZK', 'RON',
+  'ZAR', 'NGN', 'JPY', 'MXN', 'COP', 'IDR', 'AED', 'KZT', 'HUF', 'USD',
+  'BTC', 'ETH', 'BNB', 'EURI'
+]..sort((a, b) => b.length.compareTo(a.length));
 
-// ---------------------------------------------------------------- symbols
-
-/// Quote assets, longest/most specific first. Includes fiat.
-const _quotes = [
-  'FDUSD', 'USDT', 'USDC', 'USDD', 'TUSD', 'BUSD', 'USDP', 'DAI',
-  'EUR', 'GBP', 'TRY', 'BRL', 'AUD', 'RUB', 'UAH', 'ARS', 'PLN', 'RON',
-  'CZK', 'JPY', 'ZAR', 'MXN', 'COP', 'NGN', 'IDR', 'USD',
-  'BTC', 'ETH', 'BNB',
-];
-
-(String, String)? splitSym(String s) {
+/// "BTCUSDT" / "BTC-USDT" / "BTC_USDT" -> "BTC/USDT"
+String? splitSym(String s) {
+  s = s.toUpperCase();
+  for (final sep in ['-', '_', '/']) {
+    if (s.contains(sep)) {
+      final p = s.split(sep);
+      return (p.length == 2 && p[0].isNotEmpty && p[1].isNotEmpty) ? '${p[0]}/${p[1]}' : null;
+    }
+  }
   for (final q in _quotes) {
-    if (s.length > q.length && s.endsWith(q)) {
-      return (s.substring(0, s.length - q.length), q);
+    if (s.length > q.length && s.endsWith(q)) return '${s.substring(0, s.length - q.length)}/$q';
+  }
+  return null;
+}
+
+/// "BTC-USDT-SWAP", "BTCUSDT", "XBTUSDTM", "BTC_USDT" -> "BTC"
+String? coinOf(String s) {
+  s = s.toUpperCase().replaceAll(RegExp(r'[-_]SWAP$'), '').replaceAll(RegExp(r'[-_/]'), '');
+  for (final suf in ['USDTM', 'USDT']) {
+    if (s.endsWith(suf) && s.length > suf.length) {
+      s = s.substring(0, s.length - suf.length);
+      return s == 'XBT' ? 'BTC' : s;
     }
   }
   return null;
 }
 
-String normCoin(String c) {
-  c = c.toUpperCase();
-  if (c == 'XBT') return 'BTC';
-  final m = RegExp(r'^(1000000|10000|1000)(?=[A-Z])').firstMatch(c);
-  return m == null ? c : c.substring(m.end);
+dynamic _decode(String s) => jsonDecode(s);
+
+/// 8s timeout; big JSON bodies are parsed off the UI thread.
+Future<dynamic> getJson(String url, {Map<String, String>? h}) async {
+  final r = await http.get(Uri.parse(url), headers: h).timeout(const Duration(seconds: 8));
+  if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+  return r.body.length > 50000 ? compute(_decode, r.body) : jsonDecode(r.body);
 }
 
-// ------------------------------------------------------------------- spot
+double d(dynamic v) => v == null ? 0.0 : (v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 0.0);
 
-void _put(Map<String, Quote> out, String base, String quote, double bid,
-    double ask, double bq, double aq,
-    {bool est = false}) {
-  if (base.isEmpty || quote.isEmpty) return;
-  if (bid <= 0 || ask <= 0 || bid > ask) return;
-  if (bq <= 0 || aq <= 0) return;
-  out['${base.toUpperCase()}/${quote.toUpperCase()}'] =
-      Quote(bid, ask, bq, aq, est: est);
+void _put(Map<String, Quote> m, String sym, double b, double a, double bq, double aq, {bool est = false}) {
+  final s = splitSym(sym);
+  if (s == null || b <= 0 || a <= 0 || b > a) return; // skip empty/crossed books
+  m[s] = Quote(b, a, bq, aq, est: est);
 }
 
-Future<Map<String, Quote>> _bookTicker(String url) async {
-  final j = await getJson(url) as List;
-  final out = <String, Quote>{};
+// ───────────────────────── SPOT ─────────────────────────
+Future<Map<String, Quote>> _bookTicker(String base) async {
+  final j = await getJson('$base/api/v3/ticker/bookTicker') as List;
+  final m = <String, Quote>{};
   for (final e in j) {
-    final s = splitSym(e['symbol'].toString());
-    if (s == null) continue;
-    _put(out, s.$1, s.$2, dbl(e['bidPrice']), dbl(e['askPrice']),
-        dbl(e['bidQty']), dbl(e['askQty']));
+    _put(m, '${e['symbol']}', d(e['bidPrice']), d(e['askPrice']), d(e['bidQty']), d(e['askQty']));
   }
-  return out;
-}
-
-Future<Map<String, Quote>> spotBinance() async {
-  try {
-    return await _bookTicker(
-        'https://data-api.binance.vision/api/v3/ticker/bookTicker');
-  } catch (_) {
-    return _bookTicker('https://api.binance.com/api/v3/ticker/bookTicker');
-  }
-}
-
-Future<Map<String, Quote>> spotMexc() =>
-    _bookTicker('https://api.mexc.com/api/v3/ticker/bookTicker');
-
-Future<Map<String, Quote>> spotBybit() async {
-  final j = await getJson('https://api.bybit.com/v5/market/tickers?category=spot');
-  final out = <String, Quote>{};
-  for (final e in j['result']['list']) {
-    final s = splitSym(e['symbol'].toString());
-    if (s == null) continue;
-    _put(out, s.$1, s.$2, dbl(e['bid1Price']), dbl(e['ask1Price']),
-        dbl(e['bid1Size']), dbl(e['ask1Size']));
-  }
-  return out;
-}
-
-Future<Map<String, Quote>> spotOkx() async {
-  final j = await getJson('https://$okxHost/api/v5/market/tickers?instType=SPOT');
-  final out = <String, Quote>{};
-  for (final e in j['data']) {
-    final p = e['instId'].toString().split('-');
-    if (p.length != 2) continue;
-    _put(out, p[0], p[1], dbl(e['bidPx']), dbl(e['askPx']), dbl(e['bidSz']),
-        dbl(e['askSz']));
-  }
-  return out;
-}
-
-Future<Map<String, Quote>> spotBitget() async {
-  final j = await getJson('https://api.bitget.com/api/v2/spot/market/tickers');
-  final out = <String, Quote>{};
-  for (final e in j['data']) {
-    final s = splitSym(e['symbol'].toString());
-    if (s == null) continue;
-    _put(out, s.$1, s.$2, dbl(e['bidPr']), dbl(e['askPr']), dbl(e['bidSz']),
-        dbl(e['askSz']));
-  }
-  return out;
-}
-
-/// KuCoin: no top-of-book size in allTickers -> estimate from 24h base volume.
-Future<Map<String, Quote>> spotKucoin() async {
-  final j = await getJson('https://api.kucoin.com/api/v1/market/allTickers');
-  final out = <String, Quote>{};
-  for (final e in j['data']['ticker']) {
-    final p = e['symbol'].toString().split('-');
-    if (p.length != 2) continue;
-    final q = dbl(e['vol']) / 288; // ~5 min of volume
-    _put(out, p[0], p[1], dbl(e['buy']), dbl(e['sell']), q, q, est: true);
-  }
-  return out;
-}
-
-/// Gate: tickers carry no book size -> estimate from 24h base volume.
-Future<Map<String, Quote>> spotGate() async {
-  final j = await getJson('https://api.gateio.ws/api/v4/spot/tickers');
-  final out = <String, Quote>{};
-  for (final e in j) {
-    final p = e['currency_pair'].toString().split('_');
-    if (p.length != 2) continue;
-    final q = dbl(e['base_volume']) / 288;
-    _put(out, p[0], p[1], dbl(e['highest_bid']), dbl(e['lowest_ask']), q, q,
-        est: true);
-  }
-  return out;
-}
-
-Future<Map<String, Quote>> spotBingx() async {
-  final ts = DateTime.now().millisecondsSinceEpoch;
-  final j = await getJson(
-      'https://open-api.bingx.com/openApi/spot/v1/ticker/24hr?timestamp=$ts');
-  final out = <String, Quote>{};
-  for (final e in j['data']) {
-    final p = e['symbol'].toString().split('-');
-    if (p.length != 2) continue;
-    _put(out, p[0], p[1], dbl(e['bidPrice']), dbl(e['askPrice']),
-        dbl(e['bidVolume']), dbl(e['askVolume']));
-  }
-  return out;
+  return m;
 }
 
 final Map<String, Future<Map<String, Quote>> Function()> spotFetchers = {
-  'Binance': spotBinance,
-  'OKX': spotOkx,
-  'Bybit': spotBybit,
-  'Bitget': spotBitget,
-  'KuCoin': spotKucoin,
-  'MEXC': spotMexc,
-  'Gate.io': spotGate,
-  'BingX': spotBingx,
+  'Binance': () => _bookTicker('https://api.binance.com'),
+  'MEXC': () => _bookTicker('https://api.mexc.com'),
+  'Bybit': () async {
+    final j = await getJson('https://api.bybit.com/v5/market/tickers?category=spot');
+    final m = <String, Quote>{};
+    for (final e in j['result']['list']) {
+      _put(m, '${e['symbol']}', d(e['bid1Price']), d(e['ask1Price']), d(e['bid1Size']), d(e['ask1Size']));
+    }
+    return m;
+  },
+  'OKX': () async {
+    final j = await getJson('https://$okxHost/api/v5/market/tickers?instType=SPOT');
+    final m = <String, Quote>{};
+    for (final e in j['data']) {
+      _put(m, '${e['instId']}', d(e['bidPx']), d(e['askPx']), d(e['bidSz']), d(e['askSz']));
+    }
+    return m;
+  },
+  'Bitget': () async {
+    final j = await getJson('https://api.bitget.com/api/v2/spot/market/tickers');
+    final m = <String, Quote>{};
+    for (final e in j['data']) {
+      _put(m, '${e['symbol']}', d(e['bidPr']), d(e['askPr']), d(e['bidSz']), d(e['askSz']));
+    }
+    return m;
+  },
+  'KuCoin': () async {
+    final j = await getJson('https://api.kucoin.com/api/v1/market/allTickers');
+    final m = <String, Quote>{};
+    for (final e in j['data']['ticker']) {
+      final v = d(e['vol']) * 0.001; // no book sizes: estimate from 24h volume
+      _put(m, '${e['symbol']}', d(e['buy']), d(e['sell']), v, v, est: true);
+    }
+    return m;
+  },
+  'Gate.io': () async {
+    final j = await getJson('https://api.gateio.ws/api/v4/spot/tickers') as List;
+    final m = <String, Quote>{};
+    for (final e in j) {
+      final v = d(e['base_volume']) * 0.001;
+      _put(m, '${e['currency_pair']}', d(e['highest_bid']), d(e['lowest_ask']), v, v, est: true);
+    }
+    return m;
+  },
+  'BingX': () async {
+    final j = await getJson('https://open-api.bingx.com/openApi/spot/v1/ticker/24hr?timestamp=${DateTime.now().millisecondsSinceEpoch}');
+    final m = <String, Quote>{};
+    for (final e in j['data']) {
+      var bq = d(e['bidQty']), aq = d(e['askQty']);
+      final est = bq <= 0 || aq <= 0;
+      if (est) bq = aq = d(e['volume']) * 0.001;
+      _put(m, '${e['symbol']}', d(e['bidPrice']), d(e['askPrice']), bq, aq, est: est);
+    }
+    return m;
+  },
 };
 
-// ---------------------------------------------------------------- funding
-
-Future<Map<String, FR>> fundBinance() async {
-  final res = await Future.wait([
-    getJson('https://fapi.binance.com/fapi/v1/premiumIndex'),
-    getJson('https://fapi.binance.com/fapi/v1/fundingInfo')
-        .catchError((_) => <dynamic>[]),
-  ]);
-  final hours = <String, double>{
-    for (final e in (res[1] as List))
-      e['symbol'].toString(): dbl(e['fundingIntervalHours'])
-  };
-  final out = <String, FR>{};
-  for (final e in (res[0] as List)) {
-    final s = e['symbol'].toString();
-    if (!s.endsWith('USDT') || e['lastFundingRate'] == null) continue;
-    final h = hours[s] ?? 8;
-    out[normCoin(s.substring(0, s.length - 4))] =
-        FR(dbl(e['lastFundingRate']), h > 0 ? h : 8);
-  }
-  return out;
+// ───────────────────────── FUNDING (normalised to per-8h) ─────────────────────────
+void _f(Map<String, double> m, String sym, dynamic rate, double hrs) {
+  final c = coinOf(sym);
+  if (c == null) return;
+  if (hrs <= 0) hrs = 8;
+  m[c] = d(rate) * 8 / hrs;
 }
 
-List<String>? _okxIds;
+Map<String, double>? _binHrs;
+DateTime? _binHrsAt;
 
-/// OKX has no bulk funding endpoint: list instruments, then query each one
-/// (batched to respect the 20 req / 2s limit).
-Future<Map<String, FR>> fundOkx() async {
-  if (_okxIds == null) {
-    final inst =
-        await getJson('https://$okxHost/api/v5/public/instruments?instType=SWAP');
-    _okxIds = [
-      for (final e in inst['data'])
-        if (e['instId'].toString().endsWith('-USDT-SWAP') &&
-            (e['state'] == null || e['state'] == 'live'))
-          e['instId'].toString()
-    ];
-  }
-  final ids = _okxIds!;
-  final out = <String, FR>{};
-  for (var i = 0; i < ids.length; i += 10) {
-    final chunk = ids.sublist(i, min(i + 10, ids.length));
-    await Future.wait(chunk.map((id) async {
+final Map<String, Future<Map<String, double>> Function()> fundFetchers = {
+  'Binance': () async {
+    final j = await getJson('https://fapi.binance.com/fapi/v1/premiumIndex') as List;
+    if (_binHrs == null || DateTime.now().difference(_binHrsAt!).inMinutes >= 60) {
+      final h = <String, double>{};
       try {
-        final j = await getJson(
-            'https://$okxHost/api/v5/public/funding-rate?instId=$id');
-        final d = j['data'][0];
-        final ft = dbl(d['fundingTime']), nt = dbl(d['nextFundingTime']);
-        var h = (nt - ft) / 3600000;
-        if (h <= 0 || h > 24) h = 8;
-        out[normCoin(id.split('-')[0])] = FR(dbl(d['fundingRate']), h);
-      } catch (_) {/* skip this instrument */}
-    }));
-    await Future.delayed(const Duration(milliseconds: 1050));
-  }
-  if (out.isEmpty) throw Exception('no funding data');
-  return out;
-}
-
-Future<Map<String, FR>> fundBybit() async {
-  final j =
-      await getJson('https://api.bybit.com/v5/market/tickers?category=linear');
-  final out = <String, FR>{};
-  for (final e in j['result']['list']) {
-    final s = e['symbol'].toString();
-    if (!s.endsWith('USDT') || (e['fundingRate'] ?? '') == '') continue;
-    final h = dbl(e['fundingIntervalHour']);
-    out[normCoin(s.substring(0, s.length - 4))] =
-        FR(dbl(e['fundingRate']), h > 0 ? h : 8);
-  }
-  return out;
-}
-
-Future<Map<String, FR>> fundBitget() async {
-  final j = await getJson(
-      'https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES');
-  final out = <String, FR>{};
-  for (final e in j['data']) {
-    final s = e['symbol'].toString();
-    if (!s.endsWith('USDT') || (e['fundingRate'] ?? '') == '') continue;
-    out[normCoin(s.substring(0, s.length - 4))] = FR(dbl(e['fundingRate']), 8);
-  }
-  return out;
-}
-
-Future<Map<String, FR>> fundKucoin() async {
-  final j = await getJson('https://api-futures.kucoin.com/api/v1/contracts/active');
-  final out = <String, FR>{};
-  for (final e in j['data']) {
-    if (e['settleCurrency'] != 'USDT' || e['fundingFeeRate'] == null) continue;
-    var h = dbl(e['fundingRateGranularity']) / 3600000;
-    if (h <= 0) h = 8;
-    out[normCoin(e['baseCurrency'].toString())] =
-        FR(dbl(e['fundingFeeRate']), h);
-  }
-  return out;
-}
-
-Future<Map<String, FR>> fundMexc() async {
-  final j = await getJson('https://contract.mexc.com/api/v1/contract/funding_rate');
-  final out = <String, FR>{};
-  for (final e in j['data']) {
-    final s = e['symbol'].toString();
-    if (!s.endsWith('_USDT')) continue;
-    final h = dbl(e['collectCycle']);
-    out[normCoin(s.split('_')[0])] = FR(dbl(e['fundingRate']), h > 0 ? h : 8);
-  }
-  return out;
-}
-
-Future<Map<String, FR>> fundGate() async {
-  final j = await getJson('https://api.gateio.ws/api/v4/futures/usdt/contracts');
-  final out = <String, FR>{};
-  for (final e in j) {
-    final n = e['name'].toString();
-    if (!n.endsWith('_USDT') || e['funding_rate'] == null) continue;
-    final h = dbl(e['funding_interval']) / 3600;
-    out[normCoin(n.split('_')[0])] = FR(dbl(e['funding_rate']), h > 0 ? h : 8);
-  }
-  return out;
-}
-
-Future<Map<String, FR>> fundBingx() async {
-  final j = await getJson(
-      'https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex');
-  final out = <String, FR>{};
-  final data = j['data'];
-  for (final e in (data is List ? data : [data])) {
-    final s = e['symbol'].toString();
-    if (!s.endsWith('-USDT') || e['lastFundingRate'] == null) continue;
-    final h = dbl(e['fundingIntervalHours']);
-    out[normCoin(s.split('-')[0])] =
-        FR(dbl(e['lastFundingRate']), h > 0 ? h : 8);
-  }
-  return out;
-}
-
-final Map<String, Future<Map<String, FR>> Function()> fundFetchers = {
-  'Binance': fundBinance,
-  'OKX': fundOkx,
-  'Bybit': fundBybit,
-  'Bitget': fundBitget,
-  'KuCoin': fundKucoin,
-  'MEXC': fundMexc,
-  'Gate.io': fundGate,
-  'BingX': fundBingx,
+        for (final e in await getJson('https://fapi.binance.com/fapi/v1/fundingInfo') as List) {
+          h['${e['symbol']}'] = d(e['fundingIntervalHours']);
+        }
+        _binHrs = h;
+        _binHrsAt = DateTime.now();
+      } catch (_) {}
+    }
+    final hrs = _binHrs ?? <String, double>{};
+    final m = <String, double>{};
+    for (final e in j) {
+      _f(m, '${e['symbol']}', e['lastFundingRate'], hrs['${e['symbol']}'] ?? 8);
+    }
+    return m;
+  },
+  'Bybit': () async {
+    final j = await getJson('https://api.bybit.com/v5/market/tickers?category=linear');
+    final m = <String, double>{};
+    for (final e in j['result']['list']) {
+      _f(m, '${e['symbol']}', e['fundingRate'], d(e['fundingIntervalHour']));
+    }
+    return m;
+  },
+  // OKX: instruments list first, then per-instrument funding rate (batched for rate limits)
+  'OKX': () async {
+    // Fast path: one bulk request (if the endpoint supports instId=ANY); falls back to batching.
+    try {
+      final r = await getJson('https://$okxHost/api/v5/public/funding-rate?instId=ANY');
+      final bm = <String, double>{};
+      for (final e in r['data']) {
+        final id = '${e['instId']}';
+        if (!id.endsWith('-USDT-SWAP')) continue;
+        var hrs = (d(e['nextFundingTime']) - d(e['fundingTime'])) / 3600000;
+        if (hrs <= 0 || hrs > 24) hrs = 8;
+        _f(bm, id, e['fundingRate'], hrs);
+      }
+      if (bm.length > 20) return bm;
+    } catch (_) {}
+    final ins = await getJson('https://$okxHost/api/v5/public/instruments?instType=SWAP');
+    final ids = <String>[
+      for (final e in ins['data'])
+        if ('${e['instId']}'.endsWith('-USDT-SWAP') && e['state'] == 'live') '${e['instId']}'
+    ];
+    final m = <String, double>{};
+    for (var i = 0; i < ids.length; i += 10) {
+      final batch = ids.skip(i).take(10);
+      await Future.wait(batch.map((id) async {
+        try {
+          final r = await getJson('https://$okxHost/api/v5/public/funding-rate?instId=$id');
+          final e = r['data'][0];
+          var hrs = (d(e['nextFundingTime']) - d(e['fundingTime'])) / 3600000;
+          if (hrs <= 0 || hrs > 24) hrs = 8;
+          _f(m, id, e['fundingRate'], hrs);
+        } catch (_) {}
+      }));
+      await Future.delayed(const Duration(milliseconds: 900));
+    }
+    if (m.isEmpty) throw Exception('no funding data');
+    return m;
+  },
+  'Bitget': () async {
+    final j = await getJson('https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES');
+    final m = <String, double>{};
+    for (final e in j['data']) {
+      _f(m, '${e['symbol']}', e['fundingRate'], 8);
+    }
+    return m;
+  },
+  'KuCoin': () async {
+    final j = await getJson('https://api-futures.kucoin.com/api/v1/contracts/active');
+    final m = <String, double>{};
+    for (final e in j['data']) {
+      _f(m, '${e['symbol']}', e['fundingFeeRate'], d(e['fundingRateGranularity']) / 3600000);
+    }
+    return m;
+  },
+  'MEXC': () async {
+    final j = await getJson('https://contract.mexc.com/api/v1/contract/funding_rate');
+    final m = <String, double>{};
+    for (final e in j['data']) {
+      _f(m, '${e['symbol']}', e['fundingRate'], d(e['collectCycle']));
+    }
+    return m;
+  },
+  'Gate.io': () async {
+    final j = await getJson('https://api.gateio.ws/api/v4/futures/usdt/contracts') as List;
+    final m = <String, double>{};
+    for (final e in j) {
+      _f(m, '${e['name']}', e['funding_rate'], d(e['funding_interval']) / 3600);
+    }
+    return m;
+  },
+  'BingX': () async {
+    final j = await getJson('https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex');
+    final m = <String, double>{};
+    final data = j['data'];
+    if (data is List) {
+      for (final e in data) {
+        _f(m, '${e['symbol']}', e['lastFundingRate'], d(e['fundingIntervalHours']));
+      }
+    }
+    return m;
+  },
 };
