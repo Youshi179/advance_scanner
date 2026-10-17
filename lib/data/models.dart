@@ -1,107 +1,48 @@
-/// Best bid/ask for one pair on one exchange. [est] = quantities are estimated
-/// (exchange doesn't publish top-of-book size) from 24h volume.
 class Quote {
   final double bid, ask, bidQty, askQty;
-  final bool est;
+  final bool est; // true when sizes are estimated from 24h volume
   const Quote(this.bid, this.ask, this.bidQty, this.askQty, {this.est = false});
+  double get mid => (bid + ask) / 2;
 }
 
-/// Funding rate for one perp: [rate] per funding interval, [hours] interval.
-class FR {
-  final double rate;
-  final double hours;
-  const FR(this.rate, this.hours);
-  double get per8 => rate * 8 / (hours <= 0 ? 8 : hours);
-}
-
-enum WsState { ok, blocked, unknown }
-
-/// Wallet status (deposit/withdraw verification).
+/// Wallet status of one coin on one exchange (null = unknown).
 class WS {
-  final WsState state;
-  final String msg;
-  const WS(this.state, this.msg);
-  String get icon => switch (state) {
-        WsState.ok => '🟢',
-        WsState.blocked => '🔴',
-        WsState.unknown => '🟡',
-      };
+  final bool? dep, wd;
+  const WS(this.dep, this.wd);
 }
+
+enum WStatus { ok, blocked, unknown }
 
 class CrossOpp {
-  final String pair, base, quote, buyEx, sellEx;
-  final double buyAsk, sellBid, gross, net, liq;
+  final String pair, base, buyEx, sellEx, wsMsg;
+  final double buy, sell, net, liq;
   final bool est;
-  final WS ws;
-  const CrossOpp({
-    required this.pair,
-    required this.base,
-    required this.quote,
-    required this.buyEx,
-    required this.sellEx,
-    required this.buyAsk,
-    required this.sellBid,
-    required this.gross,
-    required this.net,
-    required this.liq,
-    required this.est,
-    required this.ws,
-  });
+  final WStatus ws;
+  CrossOpp(this.pair, this.base, this.buyEx, this.sellEx, this.buy, this.sell,
+      this.net, this.liq, this.est, this.ws, this.wsMsg);
 }
 
 class TriOpp {
-  final String exchange, x, y, path;
-  final bool forward, est;
+  final String ex, path, dir;
   final double net, liq;
-  const TriOpp({
-    required this.exchange,
-    required this.x,
-    required this.y,
-    required this.path,
-    required this.forward,
-    required this.net,
-    required this.liq,
-    required this.est,
-  });
+  TriOpp(this.ex, this.path, this.dir, this.net, this.liq);
 }
 
 class FundOpp {
-  final String coin, hiEx, loEx;
-  final double hiRate, loRate, edge; // per 8h
+  final String coin, hiEx, loEx, strategy;
+  final double hi, lo, edge; // per-8h rates (fractions)
   final bool single;
-  const FundOpp({
-    required this.coin,
-    required this.hiEx,
-    required this.hiRate,
-    required this.loEx,
-    required this.loRate,
-    required this.edge,
-    required this.single,
-  });
-
-  String get strategy {
-    if (!single) return 'SHORT $hiEx  •  LONG $loEx';
-    return hiRate > 0
-        ? 'SHORT perp $hiEx  +  LONG spot'
-        : 'LONG perp $hiEx  +  SHORT spot/margin';
-  }
+  FundOpp(this.coin, this.hiEx, this.hi, this.loEx, this.lo, this.edge,
+      this.single, this.strategy);
 }
 
 class Scan {
   final List<CrossOpp> cross;
   final List<TriOpp> tri;
   final List<FundOpp> fund;
-  final int spotOk, fundOk, total;
+  final int spotOk, fundOk;
   final List<String> errors;
   final DateTime time;
-  const Scan({
-    required this.cross,
-    required this.tri,
-    required this.fund,
-    required this.spotOk,
-    required this.fundOk,
-    required this.total,
-    required this.errors,
-    required this.time,
-  });
+  Scan(this.cross, this.tri, this.fund, this.spotOk, this.fundOk, this.errors,
+      this.time);
 }

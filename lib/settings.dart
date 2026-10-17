@@ -1,77 +1,16 @@
 import 'package:flutter/material.dart';
-import 'data/api.dart';
-import 'data/scanner.dart';
 import 'data/status.dart';
-import 'main.dart' show mint, pink, amber, kBg, kCard;
+import 'main.dart' show mint, card, amber;
 
-class SettingsPage extends StatelessWidget {
-  final ScannerController c;
-  const SettingsPage({super.key, required this.c});
-
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          backgroundColor: kBg,
-          title: const Text('API settings'),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: amber.withValues(alpha: .08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: amber.withValues(alpha: .3)),
-              ),
-              child: const Text(
-                'Use READ-ONLY keys only (no trading, no withdraw permission). '
-                'Keys are stored encrypted on-device and are only used to read '
-                'deposit/withdraw status.',
-                style: TextStyle(fontSize: 12.5),
-              ),
-            ),
-            const SizedBox(height: 14),
-            for (final ex in WalletService.needKey)
-              _KeyTile(ex: ex, c: c, needPass: WalletService.needPass.contains(ex)),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: kCard, borderRadius: BorderRadius.circular(14)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Public (no key needed)',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Prices & funding: ${exchanges.join(', ')}\n'
-                    'Wallet status: ${WalletService.publicEx.join(', ')}',
-                    style: const TextStyle(color: Colors.white60, fontSize: 12.5),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _KeyTile extends StatefulWidget {
-  final String ex;
-  final ScannerController c;
-  final bool needPass;
-  const _KeyTile({required this.ex, required this.c, required this.needPass});
-  @override
-  State<_KeyTile> createState() => _KeyTileState();
-}
-
-class _KeyTileState extends State<_KeyTile> {
-  final key = TextEditingController();
-  final secret = TextEditingController();
-  final pass = TextEditingController();
-  bool saved = false, busy = false, hide = true;
+class _SettingsPageState extends State<SettingsPage> {
+  final ctl = {for (final e in keyedExchanges) e: List.generate(3, (_) => TextEditingController())};
+  final saved = <String, bool>{};
 
   @override
   void initState() {
@@ -79,123 +18,85 @@ class _KeyTileState extends State<_KeyTile> {
     _load();
   }
 
-  @override
-  void dispose() {
-    key.dispose();
-    secret.dispose();
-    pass.dispose();
-    super.dispose();
-  }
-
   Future<void> _load() async {
-    final cr = await widget.c.wallet.keys.load(widget.ex);
-    if (!mounted) return;
-    setState(() {
-      saved = cr != null;
-      if (cr != null) {
-        key.text = cr.key;
-        secret.text = cr.secret;
-        pass.text = cr.pass;
+    for (final e in keyedExchanges) {
+      final c = await KeyStore.load(e);
+      if (c != null) {
+        ctl[e]![0].text = c.key;
+        ctl[e]![1].text = c.secret;
+        ctl[e]![2].text = c.pass;
+        saved[e] = true;
       }
-    });
-  }
-
-  Future<void> _save() async {
-    if (key.text.trim().isEmpty || secret.text.trim().isEmpty) return;
-    if (widget.needPass && pass.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('OKX needs a passphrase')));
-      return;
     }
-    setState(() => busy = true);
-    await widget.c.wallet.keys
-        .save(widget.ex, Cred(key.text, secret.text, pass.text));
-    await widget.c.refresh(forceWallet: true);
-    if (!mounted) return;
-    setState(() {
-      busy = false;
-      saved = true;
-    });
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('${widget.ex} key saved')));
+    if (mounted) setState(() {});
   }
 
-  Future<void> _remove() async {
-    await widget.c.wallet.keys.remove(widget.ex);
-    key.clear();
-    secret.clear();
-    pass.clear();
-    widget.c.wallet.data.remove(widget.ex);
-    await widget.c.refresh(forceWallet: true);
-    if (!mounted) return;
-    setState(() => saved = false);
+  Future<void> _save(String e) async {
+    final c = ctl[e]!;
+    if (c[0].text.trim().isEmpty || c[1].text.trim().isEmpty) return;
+    await KeyStore.save(e, Creds(c[0].text, c[1].text, c[2].text));
+    setState(() => saved[e] = true);
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e keys saved securely')));
   }
 
-  InputDecoration _dec(String l) => InputDecoration(
-        labelText: l,
-        filled: true,
-        fillColor: kBg,
-        isDense: true,
-        border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-      );
+  Future<void> _remove(String e) async {
+    await KeyStore.remove(e);
+    for (final c in ctl[e]!) {
+      c.clear();
+    }
+    setState(() => saved[e] = false);
+  }
 
-  @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        decoration: BoxDecoration(
-            color: kCard, borderRadius: BorderRadius.circular(14)),
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            title: Text(widget.ex, style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: Text(saved ? 'Key saved' : 'No key',
-                style: TextStyle(fontSize: 12, color: saved ? mint : Colors.white38)),
-            leading: Icon(saved ? Icons.lock : Icons.lock_open,
-                color: saved ? mint : Colors.white38),
-            childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            children: [
-              TextField(controller: key, decoration: _dec('API key')),
-              const SizedBox(height: 8),
-              TextField(
-                controller: secret,
-                obscureText: hide,
-                decoration: _dec('API secret').copyWith(
-                  suffixIcon: IconButton(
-                    icon: Icon(hide ? Icons.visibility : Icons.visibility_off, size: 18),
-                    onPressed: () => setState(() => hide = !hide),
-                  ),
-                ),
-              ),
-              if (widget.needPass) ...[
-                const SizedBox(height: 8),
-                TextField(
-                    controller: pass, obscureText: true, decoration: _dec('Passphrase')),
-              ],
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(
-                  child: FilledButton(
-                    onPressed: busy ? null : _save,
-                    style: FilledButton.styleFrom(
-                        backgroundColor: mint, foregroundColor: kBg),
-                    child: busy
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Save'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                OutlinedButton(
-                  onPressed: saved ? _remove : null,
-                  style: OutlinedButton.styleFrom(foregroundColor: pink),
-                  child: const Text('Remove'),
-                ),
-              ]),
-            ],
-          ),
+  Widget _field(TextEditingController c, String label, {bool secret = false}) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: TextField(
+          controller: c,
+          obscureText: secret,
+          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true),
         ),
       );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('API Settings'), backgroundColor: Colors.transparent),
+      body: ListView(padding: const EdgeInsets.all(14), children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: amber.withOpacity(.12), borderRadius: BorderRadius.circular(14)),
+          child: const Text(
+              '⚠ Use READ-ONLY keys with withdrawals disabled. Keys are stored with flutter_secure_storage and only used to read deposit/withdraw status.'),
+        ),
+        const SizedBox(height: 12),
+        for (final e in keyedExchanges)
+          Card(
+            color: card,
+            child: ExpansionTile(
+              title: Text(e),
+              subtitle: Text(saved[e] == true ? 'Key saved' : 'No key', style: TextStyle(color: saved[e] == true ? mint : Colors.white54)),
+              childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              children: [
+                _field(ctl[e]![0], 'API Key'),
+                _field(ctl[e]![1], 'API Secret', secret: true),
+                if (e == 'OKX') _field(ctl[e]![2], 'Passphrase', secret: true),
+                Row(children: [
+                  Expanded(child: FilledButton(onPressed: () => _save(e), child: const Text('Save'))),
+                  const SizedBox(width: 10),
+                  Expanded(child: OutlinedButton(onPressed: () => _remove(e), child: const Text('Remove'))),
+                ]),
+              ],
+            ),
+          ),
+        const SizedBox(height: 10),
+        Card(
+          color: card,
+          child: const Padding(
+            padding: EdgeInsets.all(14),
+            child: Text('Public (no key needed): KuCoin, Gate.io, Bitget — wallet status works without keys.\n'
+                'Prices and funding for all 8 exchanges are public.\nOKX requests go to www.okx.cab.'),
+          ),
+        ),
+      ]),
+    );
+  }
 }

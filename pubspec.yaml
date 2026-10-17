@@ -1,5 +1,5 @@
 name: advance_scanner
-description: Crypto arbitrage scanner (cross-exchange, triangular, funding) across 8 exchanges.
+description: Crypto arbitrage scanner (cross-exchange, triangular, funding).
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.2
-  crypto: ^3.0.5
+  crypto: ^3.0.3
   flutter_secure_storage: ^9.2.2
 
 flutter:
