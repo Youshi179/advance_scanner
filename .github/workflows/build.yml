@@ -45,23 +45,33 @@ jobs:
       - name: Ensure Notification permissions
         run: |
           M=android/app/src/main/AndroidManifest.xml
-          sed -i 's#</application>#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n</application>#' "$M"
-      - name: Fix Desugaring (Python)
+          if ! grep -q "android.permission.POST_NOTIFICATIONS" "$M"; then
+            sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application#' "$M"
+          fi
+      - name: Fix Desugaring
         run: |
-          python3 -c "
-          import re
-          with open('android/app/build.gradle.kts', 'r') as f:
-              content = f.read()
-          
-          # 1. Enable desugaring in compileOptions
-          content = content.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true')
-          
-          # 2. Add the library to dependencies
-          content = content.replace('dependencies {', 'dependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")')
-          
-          with open('android/app/build.gradle.kts', 'w') as f:
-              f.write(content)
-          "
+          ls android/app
+          python3 - <<'PY'
+          import os
+          if os.path.exists('android/app/build.gradle.kts'):
+              p = 'android/app/build.gradle.kts'
+              flag = 'isCoreLibraryDesugaringEnabled = true'
+              dep = 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+          else:
+              p = 'android/app/build.gradle'
+              flag = 'coreLibraryDesugaringEnabled true'
+              dep = 'dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"\n}\n'
+          s = open(p).read()
+          if 'CoreLibraryDesugaringEnabled' not in s and 'coreLibraryDesugaringEnabled' not in s:
+              s = s.replace('compileOptions {', 'compileOptions {\n        ' + flag, 1)
+          if 'desugar_jdk_libs' not in s:
+              s += '\n' + dep
+          open(p, 'w').write(s)
+          print('USING FILE:', p)
+          PY
+          echo "=========== FULL FILE ==========="
+          cat android/app/build.gradle*
+          grep -q "desugar_jdk_libs" android/app/build.gradle* || { echo "ERROR: dependency missing"; exit 1; }
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
@@ -84,7 +94,7 @@ jobs:
         run: |
           cp -r lib /tmp/lib_backup
           cp pubspec.yaml /tmp/pubspec_backup.yaml
-          flutter create --platforms=android,web --project-name youshi_scanner .
+          flutter create --platforms=web --project-name youshi_scanner .
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
