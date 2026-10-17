@@ -6,18 +6,23 @@ import 'data/models.dart';
 import 'data/scanner.dart';
 import 'data/status.dart';
 import 'settings.dart';
+import 'notifications.dart';
 
 const mint = Color(0xFF2EF2B4), cyan = Color(0xFF35C8FF), violet = Color(0xFF8B5CF6);
 const pink = Color(0xFFFF5C8A), amber = Color(0xFFFFB84D);
 const bg = Color(0xFF0B0F1A), card = Color(0xFF131A2B);
 
-void main() => runApp(const App());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService.init();
+  runApp(const App());
+}
 
 class App extends StatelessWidget {
   const App({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Advance Scanner',
+        title: 'Youshi Scanner',
         debugShowCheckedModeBanner: false,
         theme: ThemeData.dark(useMaterial3: true).copyWith(
           scaffoldBackgroundColor: bg,
@@ -27,7 +32,6 @@ class App extends StatelessWidget {
       );
 }
 
-// ───────────── Controller ─────────────
 class _Job {
   final Map<String, Map<String, Quote>> spot;
   final Map<String, Map<String, double>> fund;
@@ -35,7 +39,6 @@ class _Job {
   const _Job(this.spot, this.fund, this.wal);
 }
 
-// Runs in a background isolate (inline on web).
 (List<CrossOpp>, List<TriOpp>, List<FundOpp>) _scanJob(_Job j) =>
     (scanCross(j.spot, j.wal), scanTri(j.spot), scanFunding(j.fund));
 
@@ -43,8 +46,8 @@ class ScannerController extends ChangeNotifier {
   Scan? scan;
   bool loading = false;
   String query = '';
-  int tab = 0, wf = 0; // wf: 0 all, 1 green only, 2 hide red
-  final progress = ValueNotifier<double>(0); // separate: ticking must not rebuild the list
+  int tab = 0, wf = 0;
+  final progress = ValueNotifier<double>(0);
   int _sec = 0;
   Timer? _refresh, _tick;
 
@@ -79,7 +82,7 @@ class ScannerController extends ChangeNotifier {
       fail();
       _errors[label] = '$label: ${e.toString().replaceFirst('Exception: ', '')}';
     }
-    unawaited(_rescan()); // progressive: show results as each exchange arrives
+    unawaited(_rescan());
   }
 
   Future<void> refresh({bool forceWallet = false}) async {
@@ -92,7 +95,6 @@ class ScannerController extends ChangeNotifier {
     await Future.wait([
       for (final e in exchanges) _run('$e spot', spotFetchers[e]!, (m) => _spot[e] = m, () => _spot.remove(e)),
       for (final e in exchanges) _run('$e funding', fundFetchers[e]!, (m) => _fund[e] = m, () => _fund.remove(e)),
-      // wallet status changes rarely: refetch only every 10 min (or after keys change)
       for (final e in exchanges)
         if (forceWallet || _walAt[e] == null || now.difference(_walAt[e]!).inMinutes >= 10)
           _run('$e wallet', () => fetchWallet(e), (m) {
@@ -122,12 +124,33 @@ class ScannerController extends ChangeNotifier {
         final r = await compute(_scanJob, _Job(Map.of(_spot), Map.of(_fund), Map.of(_wal)));
         if (_disposed) return;
         scan = Scan(r.$1, r.$2, r.$3, _spot.length, _fund.length, _errors.values.toList(), DateTime.now());
+        
+        _checkForNotifications(r.$1, r.$2, r.$3);
+        
         notifyListeners();
       } while (_dirty);
     } catch (e) {
       _errors['scan'] = 'scan: $e';
     } finally {
       _scanning = false;
+    }
+  }
+
+  void _checkForNotifications(List<CrossOpp> cross, List<TriOpp> tri, List<FundOpp> fund) {
+    for (var o in cross) {
+      if (o.net >= 0.02) {
+        NotificationService.show('Cross Alert: ${o.pair}', 'Buy ${o.buyEx} • Sell ${o.sellEx} • +${pct(o.net)}%');
+      }
+    }
+    for (var o in tri) {
+      if (o.net >= 0.01) {
+        NotificationService.show('Tri Alert: ${o.ex}', '${o.path} • +${pct(o.net)}%');
+      }
+    }
+    for (var o in fund) {
+      if (o.edge >= 0.03) {
+        NotificationService.show('Funding Alert: ${o.coin}', '${o.strategy} • +${pct(o.edge)}% per 8h');
+      }
     }
   }
 
@@ -141,7 +164,6 @@ class ScannerController extends ChangeNotifier {
   }
 }
 
-// ───────────── helpers ─────────────
 String pct(double v) => (v * 100).toStringAsFixed(2);
 String fp(double v) => v >= 100 ? v.toStringAsFixed(2) : v >= 1 ? v.toStringAsFixed(4) : v >= 0.01 ? v.toStringAsFixed(6) : v.toStringAsFixed(10);
 String fl(double v) => v >= 1e6 ? '\$${(v / 1e6).toStringAsFixed(2)}M' : v >= 1e3 ? '\$${(v / 1e3).toStringAsFixed(1)}K' : '\$${v.toStringAsFixed(0)}';
@@ -153,7 +175,7 @@ class Entrance extends StatelessWidget {
   const Entrance(this.i, this.child, {super.key});
   @override
   Widget build(BuildContext context) => i >= 8
-      ? child // no extra opacity/transform layers for the rest of the list
+      ? child
       : TweenAnimationBuilder<double>(
           tween: Tween(begin: 0, end: 1),
           duration: Duration(milliseconds: 300 + i * 40),
@@ -184,7 +206,6 @@ Widget cardBox(Widget child, {VoidCallback? onTap}) => Container(
       ),
     );
 
-// ───────────── Home ─────────────
 class Home extends StatefulWidget {
   const Home({super.key});
   @override
@@ -298,7 +319,7 @@ class _HomeState extends State<Home> {
                   Expanded(
                     child: ShaderMask(
                       shaderCallback: (r) => const LinearGradient(colors: [mint, cyan, violet]).createShader(r),
-                      child: const Text('Advance Scanner', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)),
+                      child: const Text('Youshi Scanner', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)),
                     ),
                   ),
                   IconButton(
@@ -387,7 +408,6 @@ class _HomeState extends State<Home> {
   }
 }
 
-// ───────────── Profit calculator ─────────────
 class CalcSheet extends StatefulWidget {
   final FundOpp o;
   const CalcSheet(this.o, {super.key});

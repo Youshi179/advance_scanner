@@ -1,4 +1,4 @@
-name: Build release APK + deploy web
+name: Build Youshi Scanner (APK + Web)
 on:
   push:
     branches: [main]
@@ -24,11 +24,11 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Generate platform folders (repo only holds lib/ + pubspec)
+      - name: Generate platform folders
         run: |
           cp -r lib /tmp/lib_backup
           cp pubspec.yaml /tmp/pubspec_backup.yaml
-          flutter create --platforms=android,web --project-name advance_scanner .
+          flutter create --platforms=android,web --project-name youshi_scanner .
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
@@ -42,11 +42,15 @@ jobs:
           if ! grep -q "android.permission.INTERNET" "$M"; then
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$M"
           fi
+      - name: Ensure Notification permissions
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#</application>#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n</application>#' "$M"
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: advance-scanner-release
+          name: Youshi-Scanner-Release
           path: build/app/outputs/flutter-apk/app-release.apk
 
   web:
@@ -64,7 +68,7 @@ jobs:
         run: |
           cp -r lib /tmp/lib_backup
           cp pubspec.yaml /tmp/pubspec_backup.yaml
-          flutter create --platforms=android,web --project-name advance_scanner .
+          flutter create --platforms=android,web --project-name youshi_scanner .
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml

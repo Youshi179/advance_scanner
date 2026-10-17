@@ -2,11 +2,11 @@ import 'dart:math';
 import 'api.dart';
 import 'models.dart';
 
-const fee = 0.0; // fees removed (was 0.001 per leg)
+const fee = 0.0;
 const minCross = 0.02, maxCross = 0.20;
 const minTri = 0.01, maxTri = 0.20;
-const minFund = 0.02, maxFund = 0.40; // per 8h
-const minLiq = 500.0; // USDT
+const minFund = 0.02, maxFund = 0.40;
+const minLiq = 500.0;
 
 typedef Spot = Map<String, Map<String, Quote>>;
 
@@ -15,7 +15,6 @@ class _Px {
   final memo = <String, double>{};
   _Px(this.s);
 
-  /// USDT value of 1 unit of [q] (handles fiat via Q/USDT or USDT/Q).
   double q2u(String ex, String q) {
     if (stables.contains(q)) return 1;
     return memo.putIfAbsent('$ex|$q', () {
@@ -76,13 +75,11 @@ List<CrossOpp> scanCross(Spot spot, Map<String, Map<String, WS>> wal) {
   return out;
 }
 
-/// X/USDT quote for asset [a] (direct, or inverted from USDT/A).
 Quote? _usd(Map<String, Quote> m, String a) {
   final q = m['$a/USDT'];
   if (q != null) return q;
   final r = m['USDT/$a'];
   if (r == null) return null;
-  // base is USDT, so convert sizes into units of A
   return Quote(1 / r.ask, 1 / r.bid, r.askQty * r.ask, r.bidQty * r.bid, est: r.est);
 }
 
@@ -91,16 +88,16 @@ List<TriOpp> scanTri(Spot spot) {
   spot.forEach((ex, m) {
     m.forEach((sym, yx) {
       final p = sym.split('/');
-      final y = p[0], x = p[1]; // pair Y/X, bridge asset X
+      final y = p[0], x = p[1];
       if (x == 'USDT' || stables.contains(x) || stables.contains(y) || x == y) return;
       final xu = _usd(m, x), yu = _usd(m, y);
       if (xu == null || yu == null) return;
-      // USDT -> X -> Y -> USDT
+      
       final fwd = yu.bid / (xu.ask * yx.ask);
-      // USDT -> Y -> X -> USDT
       final rev = (xu.bid * yx.bid) / yu.ask;
       final isFwd = fwd >= rev;
       final net = max(fwd, rev) * pow(1 - fee, 3) - 1;
+      
       if (net < minTri || net > maxTri) return;
       final yPx = yu.mid;
       final liq = isFwd
