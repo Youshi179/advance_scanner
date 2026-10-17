@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.3.0 <4.0.0'
+  sdk: '>=3.5.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -13,7 +13,7 @@ dependencies:
   crypto: ^3.0.3
   flutter_secure_storage: ^9.2.2
   flutter_local_notifications: 17.1.2
-  workmanager: ^0.5.2
+  workmanager: ^0.9.1
 
 flutter:
   uses-material-design: true
