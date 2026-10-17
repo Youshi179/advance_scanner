@@ -18,17 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
+        with: { distribution: temurin, java-version: '17' }
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
       - name: Generate platform folders
         run: |
           cp -r lib /tmp/lib_backup
@@ -37,48 +32,22 @@ jobs:
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
-
-      - name: Set minSdk 23
+      - name: flutter_secure_storage needs minSdk 23
         run: |
-          G=android/app/build.gradle.kts
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' "$G" || true
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' "$G" || true
-
-      - name: Ensure INTERNET permission
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle.kts || true
+      - name: Ensure INTERNET permission in main manifest
         run: |
           M=android/app/src/main/AndroidManifest.xml
           if ! grep -q "android.permission.INTERNET" "$M"; then
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$M"
           fi
-
-      - name: Ensure POST_NOTIFICATIONS permission
+      - name: Ensure Notification permissions
         run: |
           M=android/app/src/main/AndroidManifest.xml
-          if ! grep -q "android.permission.POST_NOTIFICATIONS" "$M"; then
-            sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application#' "$M"
-          fi
-
-      - name: Enable Core Library Desugaring (The Right Way)
-        run: |
-          G=android/app/build.gradle.kts
-          
-          # Remove old attempts to avoid duplicates
-          sed -i '/coreLibraryDesugaring/d' "$G"
-          sed -i '/isCoreLibraryDesugaringEnabled/d' "$G"
-          
-          # Use awk to insert the dependency exactly inside the existing dependencies block
-          awk '/^dependencies \{/ { print; print "    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")"; next }1' "$G" > tmp.gradle && mv tmp.gradle "$G"
-          
-          # Use awk to insert the enabled flag inside the existing compileOptions block
-          awk '/compileOptions \{/ { print; print "        isCoreLibraryDesugaringEnabled = true"; next }1' "$G" > tmp.gradle && mv tmp.gradle "$G"
-          
-          echo "=========== build.gradle.kts ==========="
-          cat "$G"
-
+          sed -i 's#</application>#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n</application>#' "$M"
       - run: flutter pub get
-
       - run: flutter build apk --release
-
       - uses: actions/upload-artifact@v4
         with:
           name: Youshi-Scanner-Release
@@ -91,30 +60,23 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
       - name: Generate platform folders
         run: |
           cp -r lib /tmp/lib_backup
           cp pubspec.yaml /tmp/pubspec_backup.yaml
-          flutter create --platforms=web --project-name youshi_scanner .
+          flutter create --platforms=android,web --project-name youshi_scanner .
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
-
       - run: flutter pub get
-
       - run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
-
       - uses: actions/configure-pages@v5
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
-
       - id: deploy
         uses: actions/deploy-pages@v4

@@ -17,3 +17,7 @@ dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: packages/flutter_local_notifications/fonts/Roboto-Regular.ttf
