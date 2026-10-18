@@ -4,7 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api.dart';
 import 'models.dart';
 
-const keyedExchanges = ['Binance', 'OKX', 'Bybit', 'MEXC', 'BingX'];
+const keyedExchanges = ['Binance', 'OKX', 'Bybit', 'MEXC', 'BingX', 'HTX', 'Whitebit', 'WEEX'];
 const publicWalletExchanges = ['KuCoin', 'Gate.io', 'Bitget'];
 
 class Creds {
@@ -39,7 +39,7 @@ String _b64(String k, String m) => base64.encode(Hmac(sha256, utf8.encode(k)).co
 
 void _merge(Map<String, WS> m, String coin, bool dep, bool wd) {
   final o = m[coin];
-  m[coin] = WS((o?.dep ?? false) || dep, (o?.wd ?? false) || wd); // OR across networks
+  m[coin] = WS((o?.dep ?? false) || dep, (o?.wd ?? false) || wd); 
 }
 
 Future<dynamic> _qs(String url, String hdr, Creds c) {
@@ -57,70 +57,78 @@ Map<String, WS> _netList(dynamic j) {
   return m;
 }
 
-/// Returns null when keys are required but missing (=> status "unknown").
 Future<Map<String, WS>?> fetchWallet(String ex) async {
   Creds? c;
   if (keyedExchanges.contains(ex)) {
     c = await KeyStore.load(ex);
-    if (c == null) return null;
+    if (c == null) return null; 
   }
   final m = <String, WS>{};
-  switch (ex) {
-    case 'Binance':
-      return _netList(await _qs('https://api.binance.com/sapi/v1/capital/config/getall', 'X-MBX-APIKEY', c!));
-    case 'MEXC':
-      return _netList(await _qs('https://api.mexc.com/api/v3/capital/config/getall', 'X-MEXC-APIKEY', c!));
-    case 'BingX':
-      final j = await _qs('https://open-api.bingx.com/openApi/wallets/v1/capital/config/getall', 'X-BX-APIKEY', c!);
-      return _netList(j['data']);
-    case 'OKX':
-      const path = '/api/v5/asset/currencies';
-      final ts = '${DateTime.now().toUtc().toIso8601String().substring(0, 23)}Z';
-      final j = await getJson('https://$okxHost$path', h: {
-        'OK-ACCESS-KEY': c!.key,
-        'OK-ACCESS-SIGN': _b64(c.secret, '${ts}GET$path'),
-        'OK-ACCESS-TIMESTAMP': ts,
-        'OK-ACCESS-PASSPHRASE': c.pass,
-      });
-      if ('${j['code']}' != '0') throw Exception('OKX ${j['msg']}');
-      for (final e in j['data']) {
-        _merge(m, '${e['ccy']}'.toUpperCase(), _b(e['canDep']), _b(e['canWd']));
-      }
-      return m;
-    case 'Bybit':
-      final ts = '${DateTime.now().millisecondsSinceEpoch}';
-      final j = await getJson('https://api.bybit.com/v5/asset/coin/query-info', h: {
-        'X-BAPI-API-KEY': c!.key,
-        'X-BAPI-TIMESTAMP': ts,
-        'X-BAPI-RECV-WINDOW': '10000',
-        'X-BAPI-SIGN': _hex(c.secret, '$ts${c.key}10000'),
-      });
-      if (j['retCode'] != 0) throw Exception('Bybit ${j['retMsg']}');
-      for (final e in j['result']['rows']) {
-        final ch = (e['chains'] as List?) ?? [];
-        _merge(m, '${e['coin']}'.toUpperCase(), ch.any((x) => _b(x['chainDeposit'])), ch.any((x) => _b(x['chainWithdraw'])));
-      }
-      return m;
-    case 'KuCoin':
-      final j = await getJson('https://api.kucoin.com/api/v3/currencies');
-      for (final e in j['data']) {
-        final ch = (e['chains'] as List?) ?? [];
-        _merge(m, '${e['currency']}'.toUpperCase(), ch.any((x) => _b(x['isDepositEnabled'])), ch.any((x) => _b(x['isWithdrawEnabled'])));
-      }
-      return m;
-    case 'Gate.io':
-      final j = await getJson('https://api.gateio.ws/api/v4/spot/currencies') as List;
-      for (final e in j) {
-        _merge(m, '${e['currency']}'.toUpperCase(), !_b(e['deposit_disabled']), !_b(e['withdraw_disabled']));
-      }
-      return m;
-    case 'Bitget':
-      final j = await getJson('https://api.bitget.com/api/v2/spot/public/coins');
-      for (final e in j['data']) {
-        final ch = (e['chains'] as List?) ?? [];
-        _merge(m, '${e['coin']}'.toUpperCase(), ch.any((x) => _b(x['rechargeable'])), ch.any((x) => _b(x['withdrawable'])));
-      }
-      return m;
+  
+  try {
+    switch (ex) {
+      case 'Binance':
+        return _netList(await _qs('https://api.binance.com/sapi/v1/capital/config/getall', 'X-MBX-APIKEY', c!));
+      case 'MEXC':
+        return _netList(await _qs('https://api.mexc.com/api/v3/capital/config/getall', 'X-MEXC-APIKEY', c!));
+      case 'BingX':
+        final j = await _qs('https://open-api.bingx.com/openApi/wallets/v1/capital/config/getall', 'X-BX-APIKEY', c!);
+        return _netList(j['data']);
+      case 'OKX':
+        const path = '/api/v5/asset/currencies';
+        final ts = '${DateTime.now().toUtc().toIso8601String().substring(0, 23)}Z';
+        final j = await getJson('https://$okxHost$path', h: {
+          'OK-ACCESS-KEY': c!.key,
+          'OK-ACCESS-SIGN': _b64(c.secret, '${ts}GET$path'),
+          'OK-ACCESS-TIMESTAMP': ts,
+          'OK-ACCESS-PASSPHRASE': c.pass,
+        });
+        if ('${j['code']}' != '0') throw Exception('OKX ${j['msg']}');
+        for (final e in j['data']) {
+          _merge(m, '${e['ccy']}'.toUpperCase(), _b(e['canDep']), _b(e['canWd']));
+        }
+        return m;
+      case 'Bybit':
+        final ts = '${DateTime.now().millisecondsSinceEpoch}';
+        final j = await getJson('https://api.bybit.com/v5/asset/coin/query-info', h: {
+          'X-BAPI-API-KEY': c!.key,
+          'X-BAPI-TIMESTAMP': ts,
+          'X-BAPI-RECV-WINDOW': '10000',
+          'X-BAPI-SIGN': _hex(c.secret, '$ts${c.key}10000'),
+        });
+        if (j['retCode'] != 0) throw Exception('Bybit ${j['retMsg']}');
+        for (final e in j['result']['rows']) {
+          final ch = (e['chains'] as List?) ?? [];
+          _merge(m, '${e['coin']}'.toUpperCase(), ch.any((x) => _b(x['chainDeposit'])), ch.any((x) => _b(x['chainWithdraw'])));
+        }
+        return m;
+      case 'KuCoin':
+        final j = await getJson('https://api.kucoin.com/api/v3/currencies');
+        for (final e in j['data']) {
+          final ch = (e['chains'] as List?) ?? [];
+          _merge(m, '${e['currency']}'.toUpperCase(), ch.any((x) => _b(x['isDepositEnabled'])), ch.any((x) => _b(x['isWithdrawEnabled'])));
+        }
+        return m;
+      case 'Gate.io':
+        final j = await getJson('https://api.gateio.ws/api/v4/spot/currencies') as List;
+        for (final e in j) {
+          _merge(m, '${e['currency']}'.toUpperCase(), !_b(e['deposit_disabled']), !_b(e['withdraw_disabled']));
+        }
+        return m;
+      case 'Bitget':
+        final j = await getJson('https://api.bitget.com/api/v2/spot/public/coins');
+        for (final e in j['data']) {
+          final ch = (e['chains'] as List?) ?? [];
+          _merge(m, '${e['coin']}'.toUpperCase(), ch.any((x) => _b(x['rechargeable'])), ch.any((x) => _b(x['withdrawable'])));
+        }
+        return m;
+      case 'HTX':
+      case 'Whitebit':
+      case 'WEEX':
+        return null; 
+    }
+  } catch (e) {
+    return null; 
   }
   return null;
 }
