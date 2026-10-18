@@ -155,8 +155,9 @@ final Map<String, Future<Map<String, Quote>> Function()> spotFetchers = {
   },
 };
 
-void _f(Map<String, double> m, String sym, dynamic rate, double hrs) {
-  final c = coinOf(sym);
+void _f(Map<String, double> m, dynamic sym, dynamic rate, double hrs) {
+  if (sym == null || rate == null) return;
+  final c = coinOf(sym.toString());
   if (c == null) return;
   if (hrs <= 0) hrs = 8;
   m[c] = d(rate) * 8 / hrs;
