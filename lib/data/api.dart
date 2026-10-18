@@ -146,10 +146,10 @@ final Map<String, Future<Map<String, Quote>> Function()> spotFetchers = {
     return m;
   },
   'WEEX': () async {
-    final j = await getJson('https://api-spot.weex.com/api/v1/market/tickers');
+    final j = await getJson('https://api-spot.weex.com/api/v3/market/ticker/24hr');
     final m = <String, Quote>{};
     for (final e in j['data']) {
-      _put(m, '${e['symbol']}', d(e['bidPrice']), d(e['askPrice']), d(e['bidSize']), d(e['askSize']));
+      _put(m, '${e['symbol']}', d(e['bidPrice']), d(e['askPrice']), d(e['bidQty']), d(e['askQty']));
     }
     return m;
   },
@@ -284,10 +284,10 @@ final Map<String, Future<Map<String, double>> Function()> fundFetchers = {
     return m;
   },
   'WEEX': () async {
-    final j = await getJson('https://api-contract.weex.com/capi/v1/market/tickers');
+    final j = await getJson('https://api-contract.weex.com/capi/v3/market/premiumIndex');
     final m = <String, double>{};
     for (final e in j['data']) {
-      _f(m, e['symbol'], e['fundingRate'], 8);
+      _f(m, e['symbol'], e['lastFundingRate'], d(e['collectCycle']) / 60);
     }
     return m;
   },
