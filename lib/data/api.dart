@@ -3,9 +3,8 @@ import 'package:flutter/foundation.dart' show compute;
 import 'package:http/http.dart' as http;
 import 'models.dart';
 
-const exchanges = ['Binance', 'OKX', 'Bybit', 'Bitget', 'KuCoin', 'MEXC', 'Gate.io', 'BingX'];
+const exchanges = ['Binance', 'OKX', 'Bybit', 'Bitget', 'KuCoin', 'MEXC', 'Gate.io', 'BingX', 'HTX', 'Whitebit', 'WEEX'];
 
-/// CRITICAL: OKX must use okx.cab (okx.com is blocked in Pakistan).
 const okxHost = 'www.okx.cab';
 
 const stables = {
@@ -20,7 +19,6 @@ final _quotes = <String>[
   'BTC', 'ETH', 'BNB', 'EURI'
 ]..sort((a, b) => b.length.compareTo(a.length));
 
-/// "BTCUSDT" / "BTC-USDT" / "BTC_USDT" -> "BTC/USDT"
 String? splitSym(String s) {
   s = s.toUpperCase();
   for (final sep in ['-', '_', '/']) {
@@ -35,7 +33,6 @@ String? splitSym(String s) {
   return null;
 }
 
-/// "BTC-USDT-SWAP", "BTCUSDT", "XBTUSDTM", "BTC_USDT" -> "BTC"
 String? coinOf(String s) {
   s = s.toUpperCase().replaceAll(RegExp(r'[-_]SWAP$'), '').replaceAll(RegExp(r'[-_/]'), '');
   for (final suf in ['USDTM', 'USDT']) {
@@ -49,7 +46,6 @@ String? coinOf(String s) {
 
 dynamic _decode(String s) => jsonDecode(s);
 
-/// 8s timeout; big JSON bodies are parsed off the UI thread.
 Future<dynamic> getJson(String url, {Map<String, String>? h}) async {
   final r = await http.get(Uri.parse(url), headers: h).timeout(const Duration(seconds: 8));
   if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
@@ -60,11 +56,10 @@ double d(dynamic v) => v == null ? 0.0 : (v is num ? v.toDouble() : double.tryPa
 
 void _put(Map<String, Quote> m, String sym, double b, double a, double bq, double aq, {bool est = false}) {
   final s = splitSym(sym);
-  if (s == null || b <= 0 || a <= 0 || b > a) return; // skip empty/crossed books
+  if (s == null || b <= 0 || a <= 0 || b > a) return;
   m[s] = Quote(b, a, bq, aq, est: est);
 }
 
-// ───────────────────────── SPOT ─────────────────────────
 Future<Map<String, Quote>> _bookTicker(String base) async {
   final j = await getJson('$base/api/v3/ticker/bookTicker') as List;
   final m = <String, Quote>{};
@@ -105,7 +100,7 @@ final Map<String, Future<Map<String, Quote>> Function()> spotFetchers = {
     final j = await getJson('https://api.kucoin.com/api/v1/market/allTickers');
     final m = <String, Quote>{};
     for (final e in j['data']['ticker']) {
-      final v = d(e['vol']) * 0.001; // no book sizes: estimate from 24h volume
+      final v = d(e['vol']) * 0.001;
       _put(m, '${e['symbol']}', d(e['buy']), d(e['sell']), v, v, est: true);
     }
     return m;
@@ -130,9 +125,36 @@ final Map<String, Future<Map<String, Quote>> Function()> spotFetchers = {
     }
     return m;
   },
+  'HTX': () async {
+    final j = await getJson('https://api.huobi.pro/market/tickers');
+    final m = <String, Quote>{};
+    for (final e in j['data']) {
+      final v = d(e['amount']) * 0.001; 
+      _put(m, '${e['symbol']}', d(e['bid']), d(e['ask']), d(e['bidSize']), d(e['askSize']), est: v <= 0);
+    }
+    return m;
+  },
+  'Whitebit': () async {
+    final j = await getJson('https://whitebit.com/api/v4/public/ticker');
+    final m = <String, Quote>{};
+    j.forEach((k, v) {
+      if (v is Map) {
+        final vol = d(v['base_volume']) * 0.001;
+        _put(m, k, d(v['highest_bid']), d(v['lowest_ask']), vol, vol, est: true);
+      }
+    });
+    return m;
+  },
+  'WEEX': () async {
+    final j = await getJson('https://api.weex.com/api/v1/market/tickers');
+    final m = <String, Quote>{};
+    for (final e in j['data']) {
+      _put(m, '${e['symbol']}', d(e['bidPrice']), d(e['askPrice']), d(e['bidSize']), d(e['askSize']));
+    }
+    return m;
+  },
 };
 
-// ───────────────────────── FUNDING (normalised to per-8h) ─────────────────────────
 void _f(Map<String, double> m, String sym, dynamic rate, double hrs) {
   final c = coinOf(sym);
   if (c == null) return;
@@ -171,9 +193,7 @@ final Map<String, Future<Map<String, double>> Function()> fundFetchers = {
     }
     return m;
   },
-  // OKX: instruments list first, then per-instrument funding rate (batched for rate limits)
   'OKX': () async {
-    // Fast path: one bulk request (if the endpoint supports instId=ANY); falls back to batching.
     try {
       final r = await getJson('https://$okxHost/api/v5/public/funding-rate?instId=ANY');
       final bm = <String, double>{};
@@ -248,6 +268,25 @@ final Map<String, Future<Map<String, double>> Function()> fundFetchers = {
       for (final e in data) {
         _f(m, '${e['symbol']}', e['lastFundingRate'], d(e['fundingIntervalHours']));
       }
+    }
+    return m;
+  },
+  'HTX': () async {
+    return <String, double>{};
+  },
+  'Whitebit': () async {
+    final j = await getJson('https://whitebit.com/api/v4/public/futures');
+    final m = <String, double>{};
+    for (final e in j['result']) {
+      _f(m, e['ticker'], e['fundingRate'], 8);
+    }
+    return m;
+  },
+  'WEEX': () async {
+    final j = await getJson('https://api.weex.com/api/v1/contract/funding_rate');
+    final m = <String, double>{};
+    for (final e in j['data']) {
+      _f(m, e['symbol'], e['fundingRate'], 8);
     }
     return m;
   },
