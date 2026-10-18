@@ -32,18 +32,6 @@ jobs:
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
-      - name: Remove stale plugin registrant
-        run: |
-          echo "=== WorkmanagerPlugin found in: ==="
-          grep -rn "WorkmanagerPlugin" android/app/src || true
-          echo "=== java files before cleanup ==="
-          find android/app/src/main/java -type f 2>/dev/null || true
-          rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
-          if [ -d android/app/src/main/java ]; then
-            find android/app/src/main/java -name "*.java" -exec sed -i '/dev\.fluttercommunity\.workmanager\.WorkmanagerPlugin/d' {} +
-          fi
-          echo "=== after cleanup ==="
-          grep -rn "WorkmanagerPlugin" android/app/src || echo "clean: no WorkmanagerPlugin left"
       - name: flutter_secure_storage needs minSdk 23
         run: |
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts || true
@@ -54,36 +42,6 @@ jobs:
           if ! grep -q "android.permission.INTERNET" "$M"; then
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$M"
           fi
-      - name: Ensure Notification permissions
-        run: |
-          M=android/app/src/main/AndroidManifest.xml
-          if ! grep -q "android.permission.POST_NOTIFICATIONS" "$M"; then
-            sed -i 's#<application#<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application#' "$M"
-          fi
-      - name: Fix Desugaring
-        run: |
-          ls android/app
-          python3 - <<'PY'
-          import os
-          if os.path.exists('android/app/build.gradle.kts'):
-              p = 'android/app/build.gradle.kts'
-              flag = 'isCoreLibraryDesugaringEnabled = true'
-              dep = 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
-          else:
-              p = 'android/app/build.gradle'
-              flag = 'coreLibraryDesugaringEnabled true'
-              dep = 'dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"\n}\n'
-          s = open(p).read()
-          if 'CoreLibraryDesugaringEnabled' not in s and 'coreLibraryDesugaringEnabled' not in s:
-              s = s.replace('compileOptions {', 'compileOptions {\n        ' + flag, 1)
-          if 'desugar_jdk_libs' not in s:
-              s += '\n' + dep
-          open(p, 'w').write(s)
-          print('USING FILE:', p)
-          PY
-          echo "=========== FULL FILE ==========="
-          cat android/app/build.gradle*
-          grep -q "desugar_jdk_libs" android/app/build.gradle* || { echo "ERROR: dependency missing"; exit 1; }
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
@@ -106,7 +64,7 @@ jobs:
         run: |
           cp -r lib /tmp/lib_backup
           cp pubspec.yaml /tmp/pubspec_backup.yaml
-          flutter create --platforms=web --project-name youshi_scanner .
+          flutter create --platforms=android,web --project-name youshi_scanner .
           rm -rf lib test
           cp -r /tmp/lib_backup lib
           cp /tmp/pubspec_backup.yaml pubspec.yaml
