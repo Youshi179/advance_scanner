@@ -47,7 +47,7 @@ String? coinOf(String s) {
 dynamic _decode(String s) => jsonDecode(s);
 
 Future<dynamic> getJson(String url, {Map<String, String>? h}) async {
-  final r = await http.get(Uri.parse(url), headers: h).timeout(const Duration(seconds: 8));
+  final r = await http.get(Uri.parse(url), headers: h).timeout(const Duration(seconds: 30));
   if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
   return r.body.length > 50000 ? compute(_decode, r.body) : jsonDecode(r.body);
 }
@@ -146,7 +146,7 @@ final Map<String, Future<Map<String, Quote>> Function()> spotFetchers = {
     return m;
   },
   'WEEX': () async {
-    final j = await getJson('https://api.weex.com/api/v1/market/tickers');
+    final j = await getJson('https://api-spot.weex.com/api/v1/market/tickers');
     final m = <String, Quote>{};
     for (final e in j['data']) {
       _put(m, '${e['symbol']}', d(e['bidPrice']), d(e['askPrice']), d(e['bidSize']), d(e['askSize']));
@@ -283,7 +283,7 @@ final Map<String, Future<Map<String, double>> Function()> fundFetchers = {
     return m;
   },
   'WEEX': () async {
-    final j = await getJson('https://api.weex.com/api/v1/contract/funding_rate');
+    final j = await getJson('https://api-contract.weex.com/capi/v1/market/tickers');
     final m = <String, double>{};
     for (final e in j['data']) {
       _f(m, e['symbol'], e['fundingRate'], 8);
