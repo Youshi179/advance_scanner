@@ -2,10 +2,10 @@ import 'dart:math';
 import 'api.dart';
 import 'models.dart';
 
-const fee = 0.0; // Fees 0
-const minCross = 0.02, maxCross = 0.20; // Cross: 2% to 20%
-const minTri = 0.005, maxTri = 0.20; // Tri: 0.5% to 20%
-const minFund = 0.02, maxFund = 0.40; // Funding: 2% to 40%
+const fee = 0.0;
+const minCross = 0.02, maxCross = 0.20;
+const minTri = 0.001, maxTri = 0.20;
+const minFund = 0.02, maxFund = 0.40;
 const minLiq = 500.0;
 
 typedef Spot = Map<String, Map<String, Quote>>;
@@ -36,7 +36,7 @@ List<CrossOpp> scanCross(Spot spot, Map<String, Map<String, WS>> wal) {
     for (final b in qs.entries) {
       for (final s in qs.entries) {
         if (b.key == s.key) continue;
-        final net = (s.value.bid - b.value.ask) / b.value.ask; // Fee 0
+        final net = (s.value.bid - b.value.ask) / b.value.ask;
         if (net > best) {
           best = net;
           bx = b.key;
