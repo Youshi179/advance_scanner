@@ -57,10 +57,10 @@ class ScannerController extends ChangeNotifier {
 
   void start() {
     refresh();
-    _refresh = Timer.periodic(const Duration(seconds: 60), (_) => refresh());
+    _refresh = Timer.periodic(const Duration(seconds: 120), (_) => refresh());
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      _sec = (_sec + 1) % 60;
-      progress.value = _sec / 60;
+      _sec = (_sec + 1) % 120;
+      progress.value = _sec / 120;
     });
   }
 
