@@ -6,15 +6,12 @@ import 'data/models.dart';
 import 'data/scanner.dart';
 import 'data/status.dart';
 import 'settings.dart';
-import 'notifications.dart';
 
 const mint = Color(0xFF2EF2B4), cyan = Color(0xFF35C8FF), violet = Color(0xFF8B5CF6);
 const pink = Color(0xFFFF5C8A), amber = Color(0xFFFFB84D);
 const bg = Color(0xFF0B0F1A), card = Color(0xFF131A2B);
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await NotificationService.init();
+void main() {
   runApp(const App());
 }
 
@@ -124,33 +121,12 @@ class ScannerController extends ChangeNotifier {
         final r = await compute(_scanJob, _Job(Map.of(_spot), Map.of(_fund), Map.of(_wal)));
         if (_disposed) return;
         scan = Scan(r.$1, r.$2, r.$3, _spot.length, _fund.length, _errors.values.toList(), DateTime.now());
-        
-        _checkForNotifications(r.$1, r.$2, r.$3);
-        
         notifyListeners();
       } while (_dirty);
     } catch (e) {
       _errors['scan'] = 'scan: $e';
     } finally {
       _scanning = false;
-    }
-  }
-
-  void _checkForNotifications(List<CrossOpp> cross, List<TriOpp> tri, List<FundOpp> fund) {
-    for (var o in cross) {
-      if (o.net >= 0.02) {
-        NotificationService.show('Cross Alert: ${o.pair}', 'Buy ${o.buyEx} • Sell ${o.sellEx} • +${pct(o.net)}%');
-      }
-    }
-    for (var o in tri) {
-      if (o.net >= 0.01) {
-        NotificationService.show('Tri Alert: ${o.ex}', '${o.path} • +${pct(o.net)}%');
-      }
-    }
-    for (var o in fund) {
-      if (o.edge >= 0.03) {
-        NotificationService.show('Funding Alert: ${o.coin}', '${o.strategy} • +${pct(o.edge)}% per 8h');
-      }
     }
   }
 
@@ -381,7 +357,7 @@ class _HomeState extends State<Home> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Text(
-                    s == null ? 'Scanning…' : '${s.spotOk}/8 spot • ${s.fundOk}/8 funding • ${two(s.time.hour)}:${two(s.time.minute)}:${two(s.time.second)}${s.errors.isEmpty ? '' : ' • ⚠ ${s.errors.length} errors'}',
+                    s == null ? 'Scanning…' : '${s.spotOk}/11 spot • ${s.fundOk}/11 funding • ${two(s.time.hour)}:${two(s.time.minute)}:${two(s.time.second)}${s.errors.isEmpty ? '' : ' • ⚠ ${s.errors.length} errors'}',
                     style: const TextStyle(fontSize: 11, color: Colors.white54),
                   ),
                 ),
